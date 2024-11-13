@@ -1,4 +1,5 @@
 """ Training routine for GraspNet baseline model. """
+# batch size = 2 时报错显卡内存不足； batch size = 1时计算loss时存在维度不匹配的问题报错
 
 import os
 import random
@@ -23,17 +24,18 @@ sys.path.append(os.path.join(ROOT_DIR, 'dataset'))
 from pytorch_utils import BNMomentumScheduler
 from mink_dataset import GraspNetDataset_fusion, minkowski_collate_fn, load_grasp_labels
 
-
-
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset_root', required=True, help='Dataset root')
-parser.add_argument('--camera', required=True, help='Camera split [realsense/kinect]')
+# parser.add_argument('--dataset_root', required=True, help='Dataset root')
+# parser.add_argument('--camera', required=True, help='Camera split [realsense/kinect]')
+
+parser.add_argument('--dataset_root', default='/home/axe/Downloads/datasets/GraspNet', help='Dataset root')
+parser.add_argument('--camera',default='realsense', help='Camera split [realsense/kinect]')
 parser.add_argument('--checkpoint_path', default=None, help='Model checkpoint path [default: None]')
-parser.add_argument('--log_dir', default='log', help='Dump dir to save model checkpoint [default: log]')
+parser.add_argument('--log_dir', default='logs/log_gengrasp', help='Dump dir to save model checkpoint [default: log]')
 parser.add_argument('--num_point', type=int, default=20000, help='Point Number [default: 20000]')
 parser.add_argument('--num_view', type=int, default=300, help='View Number [default: 300]')
 parser.add_argument('--max_epoch', type=int, default=360, help='Epoch to run [default: 18]')
-parser.add_argument('--batch_size', type=int, default=2, help='Batch Size during training [default: 2]')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 2]')
 parser.add_argument('--num_workers', type=int, default=2, help='workers num during training [default: 2]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--weight_decay', type=float, default=0, help='Optimization L2 weight decay [default: 0]')

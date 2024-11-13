@@ -13,8 +13,8 @@ from loss_utils import GRASP_MAX_WIDTH, THRESH_BAD,THRESH_GOOD, batch_viewpoint_
 
 def process_grasp_labels(end_points):
     """ Process labels according to scene points and object poses. """
-    clouds = end_points['input_xyz']  # (B, N, 3)
-    seed_xyzs = end_points['fp2_xyz']  # (B, Ns, 3)
+    clouds = end_points['input_xyz']  # (B, N, 3) = torch.Size([2, 20000, 3])
+    seed_xyzs = end_points['fp2_xyz']  # (B, Ns, 3) = torch.Size([2, 1024, 3])
     batch_size, num_samples, _ = seed_xyzs.size()
 
     batch_grasp_points = []
@@ -145,11 +145,11 @@ def process_grasp_labels(end_points):
 
     return end_points
 
-
+# 计算 graspness_label，这里和graspness中采用的方法不一样，前者直接生成相关文件在读取数据集时读取，后者在训练时即时生成！
 def process_graspness(end_points):
     """ Process labels according to scene points and object poses. """
-    clouds = end_points['input_xyz']  # (B, N, 3)
-    seed_xyzs = end_points['fp2_xyz']  # (B, Ns, 3)
+    clouds = end_points['input_xyz']  # (B, N, 3) torch.Size([1, 20000, 3])
+    seed_xyzs = end_points['fp2_xyz']  # (B, Ns, 3) torch.Size([1, 20000, 3])
     batch_size, num_samples, _ = seed_xyzs.size()
     fric_coef_thresh = 0.4
     batch_grasp_points = []
@@ -182,7 +182,7 @@ def process_graspness(end_points):
             grasp_points_list.append(grasp_points_trans)
             grasp_points_graspness.append(graspness.reshape(Np, 1))
             
-        grasp_points = torch.cat(grasp_points_list,dim=0)
+        grasp_points = torch.cat(grasp_points_list,dim=0) # 各物体抓取点拼接成为的点集合
         grasp_points_graspness = torch.cat(grasp_points_graspness,dim=0)
         # grasp_points_distance = torch.cat(grasp_points_distance_list,dim=0)
 
@@ -200,7 +200,7 @@ def process_graspness(end_points):
         batch_graspness.append(graspness_merged)
         # batch_distance.append(distance_merged)
 
-    batch_graspness = torch.stack(batch_graspness, 0).squeeze() # (B, Ns)
+    batch_graspness = torch.stack(batch_graspness, 0).squeeze(-1) # (B, Ns),为了防止B=1出现错误，在squeeze()中指定为最后一个维度-1
     batch_graspness = batch_graspness.squeeze()
     end_points['graspness_label'] = batch_graspness
     return end_points

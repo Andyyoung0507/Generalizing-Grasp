@@ -73,10 +73,10 @@ class SignedDistanceField:
     def pos_world2object(self,pos):
         pos = pos - self.pose[:,3]
         object_frame_pos = torch.matmul(pos,self.pose[:3,:3])
-        return object_frame_pos
+        return object_frame_pos #从世界坐标系转换到物体坐标系
 
     def normal_object2world(self,normal):
-        world_frame_normal = torch.matmul(self.pose[:3,:3], normal.T).T
+        world_frame_normal = torch.matmul(self.pose[:3,:3], normal.T).T # self.pose[:3,:3]为物体在世界坐标系的表示
         return world_frame_normal
 
     def set_pose(self,pose):

@@ -26,12 +26,14 @@ from mink_dataset import GraspNetDataset_fusion, minkowski_collate_fn
 from loss_utils import generate_grasp_views, batch_viewpoint_params_to_matrix
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset_root', required=True, help='Dataset root')
-parser.add_argument('--camera', required=True, help='Camera split [realsense/kinect]')
-parser.add_argument('--c_checkpoint_path', default=None, help='Model checkpoint path [default: None]')
-parser.add_argument('--s_checkpoint_path', default=None, help='Model checkpoint path [default: None]')
-parser.add_argument('--save_dir', default='log', help='dir save the output grasp from network')
-parser.add_argument('--dump_dir', default='log', help='Dump dir to save the refined grasp')
+# parser.add_argument('--dataset_root', required=True, help='Dataset root')
+# parser.add_argument('--camera', required=True, help='Camera split [realsense/kinect]')
+parser.add_argument('--dataset_root', default='/home/axe/Downloads/datasets/GraspNet', help='Dataset root')
+parser.add_argument('--camera', default='realsense', help='Camera split [realsense/kinect]')
+parser.add_argument('--c_checkpoint_path', default='./logs/log_contactnet/checkpoint.tar', help='Model checkpoint path [default: None]')
+parser.add_argument('--s_checkpoint_path', default='./logs/log_scorenet/checkpoint.tar', help='Model checkpoint path [default: None]')
+parser.add_argument('--save_dir', default='./logs/dump_phy', help='dir save the output grasp from network')
+parser.add_argument('--dump_dir', default='./logs/dump_csjo', help='Dump dir to save the refined grasp')
 parser.add_argument('--num_point', type=int, default=20000, help='Point Number [default: 20000]')
 parser.add_argument('--num_view', type=int, default=300, help='View Number [default: 300]')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 2]')
@@ -78,6 +80,7 @@ snet.eval()
 
 class CmapEval(GraspNetEval):
 
+    # 计算了物体点云 (pc_o) 的质心，然后将物体点云平移到质心，抓取器点云 (pc_g) 和物体点云保持相对静止
     def pc_normalize(self, pc_o, pc_g):
         centroid = torch.mean(pc_o, dim=0)
         pc_o = pc_o - centroid
@@ -122,6 +125,7 @@ class CmapEval(GraspNetEval):
                 else:
                     batch_data[key] = batch_data[key].to(device)
 
+            # 读取已经由test阶段生成的相关的抓取pose文件，这个阶段是按照单个场景来进行处理的，对应的batch_size和传统意义上的有区别！
             point_clouds = batch_data['point_clouds'].squeeze().detach().cpu().numpy()
             seg_mask = batch_data['instance_mask'].squeeze().detach().cpu().numpy()
             N, _ = point_clouds.shape
@@ -154,7 +158,7 @@ class CmapEval(GraspNetEval):
                 grasp_i[:,-1] = i
                 pred_list.append(grasp_i[:5])
             pred_list = np.concatenate(pred_list,axis=0)
-            approach = pred_list[:,4:7]
+            approach = pred_list[:,4:7] # 从 approach+grasp_angle 转变为 rotation_matrix 的形式，变为了17个元素控制的抓取pose
             grasp_angle = pred_list[:,7]
             grasp_center = pred_list[:,8:11]
             obj_ids = pred_list[:,11,None]
@@ -170,6 +174,7 @@ class CmapEval(GraspNetEval):
             grasp_refined_list = []
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
+            # 对于每个物体提取分数前五的抓取pose，在单个场景中对单个pose进行固定optimization_steps步骤的优化，然后将优化后的抓取pose参数保存起来形成测试场景的抓取pose文件供 evaluate.py 后续读取文件测试精度使用！
             for i in range(len(selected_grasp_group)):
                 cropped_points = point_clouds[seg_mask == selected_grasp_group[i].object_id]
                 cropped_points = torch.from_numpy(cropped_points).cuda()
@@ -223,9 +228,10 @@ class CmapEval(GraspNetEval):
                     grasp_points = torch.from_numpy(grasp_points).cuda()
                     left_contact, right_contact = differentiable_center_to_contact(translation,approaching,
                                                                                         inplane_angle,width,depth)
-
+                    # 实际上训练ContactNet时的标签也是利用calculate_cmap计算出来的！
                     cmap, cmap_proj, loss_distance = calculate_cmap(left_contact, right_contact, cropped_points)
 
+                    # 转换到抓取物体质心处进行cnet的处理，输入是 calculate_cmap 的计算结果
                     norm_cropped_points, norm_grasp_points, obj_center = self.pc_normalize(cropped_points, grasp_points)
                     input = {
                         'point_clouds':norm_cropped_points.unsqueeze(0).float(),
@@ -250,13 +256,14 @@ class CmapEval(GraspNetEval):
                         'translation': translation_.unsqueeze(0).float(),
                     }
                     predict_score, _ = snet(score_input)
-                    loss_score = np.log(12)-predict_score
+                    loss_score = np.log(12)-predict_score # 自然对数log e 12
 
                     if t == 0:
                         start_loss_cmap = loss_cmap.item()
                         start_loss_score = loss_score.item()
 
                     center_distance = F.relu(torch.sqrt(torch.sum((cropped_points - translation.unsqueeze(0)) ** 2, dim=-1)+1e-6)-0.001)
+                    # 如果某个loss包含relu函数，则该损失项的作用是为了限制relu输入小于0。
                     loss_center = F.relu(torch.min(center_distance)-0.001)
                     loss = loss_cmap_dist + 0.2 * loss_cmap_proj + 5 * loss_center + loss_distance + 0.1 * loss_score
 
@@ -321,7 +328,7 @@ def differentiable_center_to_contact(grasp_center,approaching,inplane_angle, gra
     approaching = approaching.unsqueeze(0)
     inplane_angle = inplane_angle
     rotation_matrix = to_matrix(approaching, inplane_angle).squeeze()  # b*n,3,3
-
+    # 这里的左右接触点实际上是指抓取器（gripper）左右侧的点，而不是抓取物体表面上的点。
     height = 0.004
     left_point = torch.cat([grasp_depth - height / 2, -grasp_width / 2, torch.zeros_like(grasp_width)],
                            dim=0).unsqueeze(1)  # 3,1
@@ -370,7 +377,7 @@ def calculate_cmap(left_contact, right_contact, point_clouds):
     cmap_proj = 1 - 2 * (torch.sigmoid(4 * distance_sin) - 0.5)
     cmap = 1 - 2 * (torch.sigmoid(2 * distance) - 0.5)
     min_contact_distance = torch.min(distance_,dim=0)[0]
-    loss_contact_distance = F.relu(min_contact_distance-0.01).mean() + 5*F.relu(0.005-min_contact_distance).mean()
+    loss_contact_distance = F.relu(min_contact_distance-0.01).mean() + 5*F.relu(0.005-min_contact_distance).mean() # 倾向于将min_contact_distance控制到0.005~0.01
     return cmap,cmap_proj,loss_contact_distance
 
 

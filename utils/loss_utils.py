@@ -129,6 +129,7 @@ def batch_viewpoint_params_to_matrix(batch_towards, batch_angle):
     batch_matrix = torch.matmul(R2, R1)
     return batch_matrix
 
+# When delta is set to 1, this loss is equivalent to SmoothL1Loss
 def huber_loss(error, delta=1.0):
     """
     Args:

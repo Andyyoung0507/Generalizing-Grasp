@@ -5,7 +5,10 @@ import scipy.io as scio
 from PIL import Image
 
 import torch
-from torch._six import container_abcs
+# from torch._six import container_abcs
+# 新torch版本中弃用了
+import collections.abc as container_abcs
+
 # import collections.abc as container_abcs
 from torch.utils.data import Dataset
 import MinkowskiEngine as ME
@@ -18,7 +21,7 @@ from data_utils import CameraInfo, transform_point_cloud, create_point_cloud_fro
     get_workspace_mask, remove_invisible_grasp_points
 from graspnetAPI.utils.utils import xmlReader,parse_posevector
 
-
+# 其中的fusion——data是利用作者给的链接下载的，具体可以参考代码仓库链接
 class GraspNetDataset_fusion(Dataset):
     def __init__(self, root, valid_obj_idxs, grasp_labels, camera='kinect', split='train', num_points=20000,
                  remove_outlier=False, remove_invisible=True, augment=False, load_label=True,voxel_size = 0.005, use_fine = False):
@@ -49,7 +52,7 @@ class GraspNetDataset_fusion(Dataset):
 
         self.sceneIds = ['scene_{}'.format(str(x).zfill(4)) for x in self.sceneIds]
 
-        self.pcdpath = []
+        self.pcdpath = [] # 存储场景点云数据文件路径的列表
         self.labelpath = []
         self.sampath = []
         self.scenename = []
@@ -59,8 +62,8 @@ class GraspNetDataset_fusion(Dataset):
                 self.pcdpath.append(os.path.join(root, 'fusion_scenes_fine', x, camera, 'points.npy'))
                 self.labelpath.append(os.path.join(root, 'fusion_scenes_fine', x, camera, 'seg.npy'))
             else:
-                self.pcdpath.append(os.path.join(root, 'fusion_scenes', x, camera, 'points.npy'))
-                self.labelpath.append(os.path.join(root, 'fusion_scenes', x, camera, 'seg.npy'))
+                self.pcdpath.append(os.path.join(root, 'fusion_scenes', x, camera, 'points.npy')) # 场景点云数据
+                self.labelpath.append(os.path.join(root, 'fusion_scenes', x, camera, 'seg.npy')) # 这个数据怎么来的？文章及仓库没有说明
             # self.inspath.append(os.path.join(root, 'insseg_realsense', x[6:]+'.npy'))
             # self.sampath.append(os.path.join(root, 'sam_fusion', x[6:] + '.npy'))
             self.scenename.append(x.strip())
@@ -76,7 +79,7 @@ class GraspNetDataset_fusion(Dataset):
     def __len__(self):
         return len(self.pcdpath)
 
-    def augment_data(self, point_clouds,normals, object_poses_list):
+    def augment_data(self, point_clouds,normals, object_poses_list): # 数据增强包括点云、法向量、物体姿态矩阵等变换
         # Flipping along the YZ plane
         aug_trans = np.array([[1, 0, 0],
                               [0, 1, 0],
@@ -159,9 +162,10 @@ class GraspNetDataset_fusion(Dataset):
 
     def get_data_label(self, index):
         fusion_data = np.load(self.pcdpath[index], allow_pickle=True).item()
-        point_cloud = np.array(fusion_data['xyz'])
+        point_cloud = np.array(fusion_data['xyz']) # 此处点云数据是多个场景中的点云数据融合而成的！
         normal = np.array(fusion_data['normal'])
         color = np.array(fusion_data['color'])
+        # print(self.labelpath[index])
         seg = np.array(np.load(self.labelpath[index]))
         scene = self.scenename[index]
         # sample points
@@ -254,7 +258,7 @@ class GraspNetDataset_fusion(Dataset):
         ret_dict['grasp_labels_list'] = grasp_scores_list
         ret_dict['grasp_tolerance_list'] = grasp_tolerance_list
         ret_dict['instance_mask'] = seg_sampled
-        ret_dict['obj_list'] = ret_obj_list #np.asarray(obj_list).astype(np.int64)
+        ret_dict['obj_list'] = ret_obj_list # np.asarray(obj_list).astype(np.int64)
         return ret_dict
 
 def load_grasp_labels(root):
@@ -265,7 +269,8 @@ def load_grasp_labels(root):
         if i == 18: continue
         valid_obj_idxs.append(i + 1)  # here align with label png
         label = np.load(os.path.join(root, 'grasp_label', '{}_labels.npz'.format(str(i).zfill(3))))
-        tolerance = np.load(os.path.join(BASE_DIR, 'tolerance', '{}_tolerance.npy'.format(str(i).zfill(3))))
+        # tolerance = np.load(os.path.join(BASE_DIR, 'tolerance', '{}_tolerance.npy'.format(str(i).zfill(3))))
+        tolerance = np.load(os.path.join(root, 'tolerance', '{}_tolerance.npy'.format(str(i).zfill(3))))
         grasp_labels[i + 1] = (label['points'].astype(np.float32), label['offsets'].astype(np.float32),
                                label['scores'].astype(np.float32), tolerance)
 

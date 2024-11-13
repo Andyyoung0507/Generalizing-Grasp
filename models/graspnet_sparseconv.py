@@ -72,10 +72,10 @@ class GraspNetStage2_seed_features_multi_scale(nn.Module):
             grasp_top_views_rot = end_points['grasp_top_view_rot']
             seed_xyz = end_points['fp2_xyz']
         grasp_top_views_rot_ = grasp_top_views_rot.detach()
-        vp_features1 = self.crop1(seed_xyz, pointcloud, grasp_top_views_rot_)
-        vp_features2 = self.crop2(seed_xyz, pointcloud, grasp_top_views_rot_)
-        vp_features3 = self.crop3(seed_xyz, pointcloud, grasp_top_views_rot_)
-        vp_features4 = self.crop4(seed_xyz, pointcloud, grasp_top_views_rot_)
+        vp_features1 = self.crop1(seed_xyz, pointcloud, grasp_top_views_rot_) # torch.Size([1, 256, 1024, 4])
+        vp_features2 = self.crop2(seed_xyz, pointcloud, grasp_top_views_rot_) # torch.Size([1, 256, 1024, 4])
+        vp_features3 = self.crop3(seed_xyz, pointcloud, grasp_top_views_rot_) # torch.Size([1, 256, 1024, 4])
+        vp_features4 = self.crop4(seed_xyz, pointcloud, grasp_top_views_rot_) # torch.Size([1, 256, 1024, 4])
 
         B, _, num_seed, num_depth = vp_features1.size()
         vp_features_concat = torch.cat([vp_features1, vp_features2, vp_features3, vp_features4], dim=1)

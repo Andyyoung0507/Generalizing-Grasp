@@ -21,7 +21,8 @@ from mink_dataset import GraspNetDataset_fusion, minkowski_collate_fn,load_grasp
 from collision_detector import ModelFreeCollisionDetector
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset_root', required=True, help='Dataset root')
+# parser.add_argument('--dataset_root', required=True, help='Dataset root')
+parser.add_argument('--dataset_root', default='/home/axe/Downloads/datasets/GraspNet', help='Dataset root')
 parser.add_argument('--checkpoint_path', required=True, help='Model checkpoint path')
 parser.add_argument('--dump_dir'
                     , required=True, help='Dump dir to save outputs')
@@ -130,3 +131,4 @@ if __name__=='__main__':
     torch.cuda.manual_seed(822)
     np.random.seed(822)
     inference()
+    # evaluate()

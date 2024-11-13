@@ -46,7 +46,7 @@ class ApproachNet_regression_view_fps(nn.Module):
     def forward(self, seed_xyz, seed_features, end_points, is_training=False,sample_from_sp_distribution=False):
 
         B, _, _ = seed_xyz.size()
-        end_points['fp2_xyz'] = seed_xyz
+        end_points['fp2_xyz'] = seed_xyz # 这里输入的点是未经采样处理的点，torch.Size([B, 20000, 3])
         graspable = self.graspable_head(seed_features)
         objectness_score = graspable[:, :2]
         graspness_score = graspable[:, 2]
@@ -63,7 +63,7 @@ class ApproachNet_regression_view_fps(nn.Module):
         graspable_inds_list = []
         for i in range(B):
             graspable_points = seed_xyz[i][graspness_mask[i] == 1]
-            sample_inds = furthest_point_sample(graspable_points.unsqueeze(0), 1024).long()
+            sample_inds = furthest_point_sample(graspable_points.unsqueeze(0), 1024).long() # 此处利用最远点采样graspable_points,将点的数量变为1024个点
             inds = torch.where(graspness_mask[i] == 1)[0].unsqueeze(0)
             graspable_inds = torch.gather(inds, 1, sample_inds)
             graspable_inds_list.append(graspable_inds)
@@ -80,22 +80,22 @@ class ApproachNet_regression_view_fps(nn.Module):
         fp2_graspness = torch.gather(graspness_score, 1, graspable_inds)
         end_points['fp2_graspness'] = fp2_graspness
 
-        features = F.relu(self.bn1(self.conv1(graspable_features)), inplace=True)
-        features = self.conv2(features)
+        features = F.relu(self.bn1(self.conv1(graspable_features)), inplace=True) # features.shape = torch.Size([1, 256, 1024])
+        features = self.conv2(features) # features.shape = torch.Size([1, 3, 1024])
 
         vp_xyz = features.transpose(1, 2).contiguous()  # (B, num_seed, 3)
-        end_points['view_prediction'] = vp_xyz
+        end_points['view_prediction'] = vp_xyz # 采样点视角预测，法向量
 
         template_views = generate_grasp_views(300).to(seed_features.device)  # (num_view, 3)
         template_views = template_views.view(1, 1, 300, 3).expand(B, num_seed, -1, -1).contiguous()  # (B, num_seed, num_view, 3)
 
-        top_view_inds = torch.argmax(torch.cosine_similarity(template_views, vp_xyz.unsqueeze(2), dim=-1), dim=2)
+        top_view_inds = torch.argmax(torch.cosine_similarity(template_views, vp_xyz.unsqueeze(2), dim=-1), dim=2) # 在每个采样点选取一个与预测view相似度最大的那个方向！
         vp_xyz_ = vp_xyz.view(-1, 3)
 
         # no rotation here
         batch_angle = torch.zeros(vp_xyz_.size(0), dtype=vp_xyz.dtype, device=vp_xyz.device)
         # transfer approach to 3x3
-        vp_rot = batch_viewpoint_params_to_matrix(-vp_xyz_, batch_angle).view(B, num_seed, 3, 3)
+        vp_rot = batch_viewpoint_params_to_matrix(-vp_xyz_, batch_angle).view(B, num_seed, 3, 3) # 转化方向向量为旋转矩阵
         end_points['grasp_top_view_inds'] = top_view_inds
         end_points['grasp_top_view_xyz'] = vp_xyz
         end_points['grasp_top_view_rot'] = vp_rot
@@ -216,7 +216,7 @@ class OperationNet_regression(nn.Module):
         vp_features = vp_features.view(B, -1, num_seed, num_depth)
         end_points['grasp_score_pred'] = vp_features[:, 0]
         # eps = 1e-8
-        end_points['grasp_angle_pred'] = F.tanh(vp_features[:, 1:3])
+        end_points['grasp_angle_pred'] = F.tanh(vp_features[:, 1:3]) # 这里直接计算转动角度，而不是按照之前的12等分进行分类了！
         sin2theta = F.tanh(vp_features[:, 1])
         cos2theta = F.tanh(vp_features[:, 2])
         angle = 0.5 * torch.atan2(sin2theta, cos2theta)
@@ -224,7 +224,7 @@ class OperationNet_regression(nn.Module):
         # sin2theta = torch.clamp(vp_features[:, 1], min=-1.0+eps, max=1.0-eps)
         # cos2theta = torch.clamp(vp_features[:, 1], min=-1.0 + eps, max=1.0 - eps)
         end_points['grasp_angle_value_pred'] = angle
-        end_points['grasp_width_pred'] = F.sigmoid(vp_features[:, 3]) * 0.1
+        end_points['grasp_width_pred'] = F.sigmoid(vp_features[:, 3]) * 0.1 # 这里预测的了抓取姿态的width
         return end_points
 
 

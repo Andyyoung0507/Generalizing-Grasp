@@ -73,6 +73,8 @@ class ContactNet(nn.Module):
         criterion = nn.MSELoss(reduction='none')
         weight = cmap_gt
         loss_dist = criterion(cmap, cmap_gt)
+        # 损失与权重相乘的目的是为了在计算损失时考虑不同样本的重要性或优先级。这种方法可以帮助模型在训练过程中更好地聚焦于某些特定样本，从而提高模型的性能,
+        # 因为要加权，所以 nn.MSELoss(reduction='none') reduction='none'如此设置，并直接计算了相关项的损失！
         loss_dist = torch.sum(loss_dist * weight, dim=-1) / (torch.sum(weight,dim=-1) + 1e-6)
 
         cmap_cos_gt = end_points['cmap_label_proj']

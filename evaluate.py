@@ -190,7 +190,9 @@ class GraspNetEvalComplete(GraspNetEval):
         else:
             return scene_accuracy, grasp_list_list, score_list_list, collision_list_list
 
-ge = GraspNetEvalComplete(root="/data/graspnet", camera="realsense", split='test')
+# ge = GraspNetEvalComplete(root="/data/graspnet", camera="realsense", split='test')
+ge = GraspNetEvalComplete(root="/home/axe/Downloads/datasets/GraspNet", camera="realsense", split='test')
+
 path = "logs/dump_csjo"
 
 res, ap = ge.eval_seen(path, proc=32)

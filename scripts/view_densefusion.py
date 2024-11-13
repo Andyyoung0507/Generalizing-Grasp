@@ -5,29 +5,28 @@ from PIL import Image
 
 import os
 import sys
+
 # 获取当前文件的目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 获取上级目录
 parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
 # 将上级目录添加到 sys.path
-# sys.path.append(parent_dir)
 sys.path.append(os.path.join(parent_dir, 'utils'))
 
-from data_utils import CameraInfo,create_point_cloud_from_depth_image,transform_point_cloud
-
+from data_utils import CameraInfo, create_point_cloud_from_depth_image, transform_point_cloud
 
 height = 720
 width = 1280
 # root = "/data/graspnet"
 root = "/home/axe/Downloads/datasets/GraspNet"
 
-for scene_id in range(130,190):
-    scene_path = os.path.join(root,"scenes",'scene_{}'.format(str(scene_id).zfill(4)),"realsense")
-    save_path = os.path.join(root, "fusion_scenes",'scene_{}'.format(str(scene_id).zfill(4)),"realsense")
+for scene_id in range(130, 190):
+    scene_path = os.path.join(root, "scenes", 'scene_{}'.format(str(scene_id).zfill(4)), "realsense")
+    save_path = os.path.join(root, "fusion_scenes", 'scene_{}'.format(str(scene_id).zfill(4)), "realsense")
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    camera_poses = np.load(os.path.join(scene_path,"camera_poses.npy"))
-    intrinsic_data = np.load(os.path.join(scene_path,"camK.npy"))
+    camera_poses = np.load(os.path.join(scene_path, "camera_poses.npy"))
+    intrinsic_data = np.load(os.path.join(scene_path, "camK.npy"))
     volume = o3d.pipelines.integration.ScalableTSDFVolume(
         voxel_length=0.005,
         sdf_trunc=0.04,
@@ -64,18 +63,21 @@ for scene_id in range(130,190):
         volume.integrate(rgbd, intrinsic, np.linalg.inv(camera_poses[i]))
 
     pcd = volume.extract_point_cloud()
-    # mesh.compute_vertex_normals()
     pcd.transform(to_world_mat)
-    # pcd_remove, ind = pcd.remove_statistical_outlier(nb_neighbors=20,
-    #                                                     std_ratio=0.5)
     pcd = pcd.voxel_down_sample(voxel_size=0.001)
     xyz = np.asarray(pcd.points)
     normal = np.asarray(pcd.normals)
     color = np.asarray(pcd.colors)
     save_dict = {
-        'xyz':xyz,
-        'color':color,
-        'normal':normal
+        'xyz': xyz,
+        'color': color,
+        'normal': normal
     }
-    np.save(save_path+"/points.npy",save_dict)
+    # np.save(save_path + "/points.npy", save_dict)
 
+    # 可视化点云数据
+    print("Visualizing the point cloud for scene {}".format(scene_id))
+    o3d.visualization.draw_geometries([pcd], window_name="Scene {}".format(scene_id))
+
+    # 你也可以保存点云数据到文件中，如.ply格式
+    # o3d.io.write_point_cloud(os.path.join(save_path, "integrated_scene_{}.ply".format(scene_id)), pcd)

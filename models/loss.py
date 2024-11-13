@@ -32,16 +32,16 @@ def get_loss(end_points):
     return loss, end_points
 
 
-def compute_graspable_loss_sparse(end_points):
+def compute_graspable_loss_sparse(end_points):  # 采样点是否为物体，物体上的采样点的graspness数值回归
     criterion1 = nn.CrossEntropyLoss(reduction='mean')
-    criterion2 = nn.SmoothL1Loss(reduction='none')
+    criterion2 = nn.SmoothL1Loss(reduction='none') # 对于异常值不那么敏感
     graspness_score = end_points['graspness_score']
     graspness_label = end_points['graspness_label']
     objectness_score = end_points['objectness_score']
     objectness_label = end_points['objectness_label']
     objectness_loss = criterion1(objectness_score, objectness_label)
     objectness_pred = torch.argmax(objectness_score, 1)
-    end_points['stage1_objectness_acc'] = (objectness_pred == objectness_label.long()).float().mean()
+    end_points['stage1_objectness_acc'] = (objectness_pred == objectness_label.long()).float().mean() # 取均值得到的结果实际上是计算了在所有预测为正类的样本中，正确预测的比例
     end_points['stage1_objectness_prec'] = (objectness_pred == objectness_label.long())[
         objectness_pred == 1].float().mean()
     end_points['stage1_objectness_recall'] = (objectness_pred == objectness_label.long())[
@@ -50,10 +50,13 @@ def compute_graspable_loss_sparse(end_points):
 
     loss_mask = end_points['objectness_label'].bool()
     loss = criterion2(graspness_score, graspness_label)
-    loss = loss[loss_mask]
+    loss = loss[loss_mask] # 物体上的点才统计 graspness 信息
     loss = loss.mean()
+    B, N = graspness_score.shape
+    # graspness_label = graspness_label.view(B,-1)
     graspness_score_c = graspness_score.detach().clone()[loss_mask]
-    graspness_label_c = graspness_label.detach().clone()[loss_mask]
+    # graspness_label_c = graspness_label.detach().clone()[loss_mask]
+    graspness_label_c = graspness_label.detach().clone().view(B,-1)[loss_mask] # 单个样本测试训练代码时因维度信息报错，新增了 view(B,-1)
     graspness_score_c = torch.clamp(graspness_score_c, 0., 0.99)
     graspness_label_c = torch.clamp(graspness_label_c, 0., 0.99)
     rank_error = (torch.abs(torch.trunc(graspness_score_c * 20) - torch.trunc(graspness_label_c * 20)) / 20.).mean()
@@ -62,35 +65,35 @@ def compute_graspable_loss_sparse(end_points):
     return loss+objectness_loss, end_points
 
 def compute_robust_view_loss_regression(end_points):
-    view_direction = end_points['view_prediction']
+    view_direction = end_points['view_prediction'] # torch.Size([1, 1024, 3])
     template_views = end_points['batch_grasp_view_all']  # (B, Ns,V, 3)
-    view_label = end_points['batch_grasp_view_label']
-    objectness_label = end_points['objectness_label']
-    fp2_inds = end_points['fp2_inds'].long()
+    view_label = end_points['batch_grasp_view_label'] # torch.Size([1, 1024, 300])
+    objectness_label = end_points['objectness_label'] # torch.Size([1, 20000])
+    fp2_inds = end_points['fp2_inds'].long() # torch.Size([1, 1024])
     V = view_label.size(2)
-    objectness_label = torch.gather(objectness_label, 1, fp2_inds)
+    objectness_label = torch.gather(objectness_label, 1, fp2_inds) # torch.Size([1, 1024])
 
-    batch_grasp_label = end_points['batch_grasp_label_all']
+    batch_grasp_label = end_points['batch_grasp_label_all'] # torch.Size([1, 1024, 300, 12, 4])
     B, Ns, V, A, D = batch_grasp_label.size()
-    target_labels = batch_grasp_label.view(B, Ns,V, -1)
-    target_labels = target_labels.sum(3)
+    target_labels = batch_grasp_label.view(B, Ns,V, -1) # torch.Size([1, 1024, 300, 48])
+    target_labels = target_labels.sum(3) # torch.Size([1, 1024, 300]) 单个视角上的抓取标签分数做了累计
 
-    max_target_labels, target_inds = torch.max(target_labels, dim=2)
+    max_target_labels, target_inds = torch.max(target_labels, dim=2) # 选取累计抓取标签分数最高的view
     target_inds = target_inds.view(B, Ns, 1, 1).expand(-1, -1, -1, 3)
-    target_direction = torch.gather(template_views, 2, target_inds).squeeze(2)
+    target_direction = torch.gather(template_views, 2, target_inds).squeeze(2) # torch.Size([1, 1024, 3]) 在采样点选出了对应最高累计分数的view向量
 
     # normalize
-    min = torch.min(target_labels,dim=2,keepdim=True)[0]
+    min = torch.min(target_labels,dim=2,keepdim=True)[0] # torch.Size([1, 1024, 1])
     max = torch.max(target_labels,dim=2,keepdim=True)[0]
     target_labels_norm = (target_labels-min)/(max-min+1e-5)
     neighbor_view = (F.cosine_similarity(view_direction.unsqueeze(2),template_views,dim=-1)+1)/2
     neighbor_view[neighbor_view<np.cos(np.pi/6)] = 0
-    predict_view_score = torch.sum(neighbor_view*target_labels_norm,dim=-1)/(neighbor_view.sum(dim=-1))
+    predict_view_score = torch.sum(neighbor_view*target_labels_norm,dim=-1)/(neighbor_view.sum(dim=-1)) # 高分数view的回归相似度损失
     graspable_cnt = torch.sum((target_labels > THRESH_BAD).long(),dim=2)
     graspable_label = (graspable_cnt>10) * objectness_label
     objectness_mask = (graspable_label > 0)
     center_loss = torch.sum((1-predict_view_score) * objectness_mask) / (objectness_mask.sum() + 1e-6)
-    reg_loss = (1 - F.cosine_similarity(view_direction, target_direction, dim=-1)) * 0.5
+    reg_loss = (1 - F.cosine_similarity(view_direction, target_direction, dim=-1)) * 0.5 # 回归view的相似度损失
     reg_loss = torch.sum(reg_loss * objectness_mask) / (objectness_mask.sum() + 1e-6)
     loss = reg_loss+0.1*center_loss
     end_points['loss/stage1_view_reg_loss'] = reg_loss
@@ -102,8 +105,8 @@ def compute_robust_view_loss_regression(end_points):
 def compute_grasp_loss_regression(end_points, episodic = False):
     top_view_inds = end_points['grasp_top_view_inds']  # (B, Ns)
     vp_rot = end_points['grasp_top_view_rot']  # (B, Ns, view_factor, 3, 3)
-    objectness_label = end_points['objectness_label']
-    fp2_inds = end_points['fp2_inds'].long()
+    objectness_label = end_points['objectness_label'] # torch.Size([1, 20000])
+    fp2_inds = end_points['fp2_inds'].long() # torch.Size([1, 1024])
     objectness_mask = torch.gather(objectness_label, 1, fp2_inds).bool()  # (B, Ns)
     # objectness_mask = end_points['graspable_mask']
     # process labels
@@ -116,7 +119,7 @@ def compute_grasp_loss_regression(end_points, episodic = False):
     top_view_grasp_angles = batch_grasp_offset[:, :, :, :, 0]  # (B, Ns, A, D)
     top_view_grasp_depths = batch_grasp_offset[:, :, :, :, 1]  # (B, Ns, A, D)
     top_view_grasp_widths = batch_grasp_offset[:, :, :, :, 2]  # (B, Ns, A, D)
-    target_labels_inds = torch.argmax(batch_grasp_label, dim=2, keepdim=True)  # (B, Ns, 1, D)
+    target_labels_inds = torch.argmax(batch_grasp_label, dim=2, keepdim=True)  # (B, Ns, 1, D) 选择分数最高的抓取pose对应的angle，对应选出抓取pose其他的标签变量
     target_labels = torch.gather(batch_grasp_label, 2, target_labels_inds).squeeze(2)  # (B, Ns, D)
     target_angles = torch.gather(top_view_grasp_angles, 2, target_labels_inds).squeeze(2)  # (B, Ns, D)
     target_depths = torch.gather(top_view_grasp_depths, 2, target_labels_inds).squeeze(2)  # (B, Ns, D)
@@ -127,7 +130,7 @@ def compute_grasp_loss_regression(end_points, episodic = False):
     # end_points['target_depths'] = target_depths
     target_tolerance = torch.gather(batch_grasp_tolerance, 2, target_labels_inds).squeeze(2)  # (B, Ns, D)
 
-    graspable_mask = (target_labels > THRESH_BAD)
+    graspable_mask = (target_labels > THRESH_BAD) # 分数大于相关阈值
     objectness_mask = objectness_mask.unsqueeze(-1).expand_as(graspable_mask)
     loss_mask = (objectness_mask & graspable_mask).float()
 
@@ -140,7 +143,7 @@ def compute_grasp_loss_regression(end_points, episodic = False):
         loss_mask = loss_mask * supervised_mask
 
     # 1. grasp score loss
-    depth_loss_mask = loss_mask.max(dim=2)[0].unsqueeze(-1).expand_as(loss_mask)
+    depth_loss_mask = loss_mask.max(dim=2)[0].unsqueeze(-1).expand_as(loss_mask) # depth维度的值，因为由bool转变而来，所以其实值也是1
     target_labels_inds_ = target_labels_inds.transpose(1, 2)  # (B, 1, Ns, D)
     # grasp_score = torch.gather(end_points['grasp_score_pred'], 1, target_labels_inds_).squeeze(1)
     grasp_score = end_points['grasp_score_pred']
@@ -156,7 +159,7 @@ def compute_grasp_loss_regression(end_points, episodic = False):
     # target_angles[target_angles>(0.5*np.pi)] -= np.pi
     target_sin2theta = torch.sin(target_angles * 2)
     target_cos2theta = torch.cos(target_angles * 2)
-    grasp_angle_reg_loss = huber_loss(grasp_angle_sin2theta - target_sin2theta, delta=1.0) + huber_loss(grasp_angle_cos2theta - target_cos2theta, delta=1.0)
+    grasp_angle_reg_loss = huber_loss(grasp_angle_sin2theta - target_sin2theta, delta=1.0) + huber_loss(grasp_angle_cos2theta - target_cos2theta, delta=1.0) # 计算损失时利用正余弦
     grasp_angle_reg_loss = torch.sum(grasp_angle_reg_loss * loss_mask) / (loss_mask.sum() + 1e-6)
     grasp_angle_pred = end_points['grasp_angle_value_pred']
     end_points['loss/stage2_grasp_angle_reg_loss'] = grasp_angle_reg_loss

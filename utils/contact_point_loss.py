@@ -44,29 +44,31 @@ novel_objects = [3, 4, 6, 17, 19, 20, 24, 26, 27, 28, 30, 31, 32, 33, 35, 45, 47
                  67, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87]
 mesh_dict = {}
 sdf_dict = {}
-load_SDF("/home/LAB/r-yanghongyu/data/graspnet")
+# load_SDF("/home/LAB/r-yanghongyu/data/graspnet")
+load_SDF("/home/axe/Downloads/datasets/GraspNet")
+
 
 
 def contact_point_loss_sdf(end_points):
     left_contact, right_contact, mask, end_points = output_to_grasp(end_points)
     batch_size = left_contact.shape[0]
-    instance_mask = end_points['instance_mask']
+    instance_mask = end_points['instance_mask'] # 从 "root, 'fusion_scenes', x, camera, 'seg.npy'"读取的相关seg文件, torch.Size([1, 20000])
     fp2_inds = end_points['fp2_inds'].long()
-    instance_mask_ = torch.gather(instance_mask, 1, fp2_inds)
-    poses = end_points['object_poses_list']
+    instance_mask_ = torch.gather(instance_mask, 1, fp2_inds) # torch.Size([1, 1024])
+    poses = end_points['object_poses_list'] # 场景中的物体姿态合集
     obj_list = end_points['obj_list']
     width = end_points['grasp_width_fuse']
     grasp_score = end_points['grasp_score_depth']
-    contact_collision_loss = 0
+    contact_collision_loss = 0 # 相关损失正则项在样本循环外置零，样本循环内累加
     contact_normal_loss = 0
     surface_dist_loss = 0
     width_regularization_loss = 0
 
-    for i in range(batch_size):
+    for i in range(batch_size): # 逐样本循环
         b_instance_mask = instance_mask_[i]
         b_poses = poses[i]
         b_obj_list = obj_list[i]
-        _loss_mask = mask[i]
+        _loss_mask = mask[i] # 可抓取的物体上的点
         b_grasp_score = grasp_score[i]
         b_left_contact = left_contact[i]
         b_right_contact = right_contact[i]
@@ -74,15 +76,16 @@ def contact_point_loss_sdf(end_points):
         l_sdf = torch.zeros(b_left_contact.shape[0]).cuda()
         r_normal = torch.zeros_like(b_right_contact)
         r_sdf = torch.zeros(b_right_contact.shape[0]).cuda()
-        for j in range(len(b_obj_list)):
+        for j in range(len(b_obj_list)): # 逐物体循环
             obj_idx = int(b_obj_list[j])
-            obj_mask = (b_instance_mask == (obj_idx + 1))
-            obj_pose = b_poses[j]
-            obj_sdf = sdf_dict[obj_idx]
+            obj_mask = (b_instance_mask == (obj_idx + 1)) # 选出对应物体的 seg 部分，后续不同物体的相关信息统计互不干扰
+            obj_pose = b_poses[j] # 物体在世界坐标系下的位姿矩阵
+            obj_sdf = sdf_dict[obj_idx] # 读取物体的sdf文件
+            # 之后调用的相关方法，主要参考SignedDistanceField 类下的方法！
             obj_sdf.set_pose(obj_pose)
 
             r_point_obj = b_right_contact[obj_mask]
-            r_point_obj_ = obj_sdf.pos_world2object(r_point_obj)
+            r_point_obj_ = obj_sdf.pos_world2object(r_point_obj) # 从世界坐标系转换到物体坐标系
             r_sdf_obj, r_surface_normal_obj_ = obj_sdf.sample_sdf_and_normal(r_point_obj_)
             r_surface_normal_obj = obj_sdf.normal_object2world(r_surface_normal_obj_)
 
@@ -91,12 +94,12 @@ def contact_point_loss_sdf(end_points):
             l_sdf_obj, l_surface_normal_obj_ = obj_sdf.sample_sdf_and_normal(l_point_obj_)
             l_surface_normal_obj = obj_sdf.normal_object2world(l_surface_normal_obj_)
 
-            l_sdf[obj_mask] = l_sdf_obj
+            l_sdf[obj_mask] = l_sdf_obj # 将上述计算出的对应指标放入对应的采样点标志位置，不同物体之间互不干扰
             l_normal[obj_mask] = l_surface_normal_obj
             r_sdf[obj_mask] = r_sdf_obj
             r_normal[obj_mask] = r_surface_normal_obj
 
-        loss_mask = _loss_mask*b_grasp_score
+        loss_mask = _loss_mask*b_grasp_score # 只计算需要统计位置的相关正则项，无关位置不计算
         l_collision_loss = torch.sum(F.relu(0.005-l_sdf) * loss_mask) / (loss_mask.sum() + 1e-5)
         surface_thresh = 0.02
         l_surface_dist_constrain_loss = torch.sum(F.relu(l_sdf - surface_thresh) * loss_mask) / (loss_mask.sum() + 1e-5)
@@ -133,18 +136,18 @@ def contact_point_loss_sdf(end_points):
     return loss, end_points
 
 
-def output_to_grasp(end_points):
-    grasp_score = end_points['grasp_score_pred']
+def output_to_grasp(end_points): # 转化为抓取相关参数
+    grasp_score = end_points['grasp_score_pred'] # (B, num_seed, num_depth)对应的size
     grasp_center = end_points['batch_grasp_point']
     approaching = -end_points['grasp_top_view_xyz']
     grasp_angle = end_points['grasp_angle_value_pred']
     grasp_width = end_points['grasp_width_pred']
-    # one-hot version
-    grasp_depth_class = torch.argmax(grasp_score, 2, keepdims=True)
-    grasp_depth = ((grasp_depth_class.float() + 1) * 0.01).squeeze()
-    grasp_angle = torch.gather(grasp_angle, 2, grasp_depth_class).squeeze()
-    grasp_width = torch.gather(grasp_width, 2, grasp_depth_class).squeeze()
-    grasp_score = torch.gather(grasp_score, 2, grasp_depth_class).squeeze()
+    # one-hot version,为什么是维度2呢？不是角度吗？深度？在目前的shape下是深度，角度已经选过了
+    grasp_depth_class = torch.argmax(grasp_score, 2, keepdims=True) # torch.Size([1, 1024, 1])
+    grasp_depth = ((grasp_depth_class.float() + 1) * 0.01).squeeze(-1) # batch_size=1时squeeze()需指定最后维度，否则维度报错 torch.Size([1, 1024])
+    grasp_angle = torch.gather(grasp_angle, 2, grasp_depth_class).squeeze(-1) # batch_size=1时squeeze()需指定最后维度，否则维度报错 
+    grasp_width = torch.gather(grasp_width, 2, grasp_depth_class).squeeze(-1)
+    grasp_score = torch.gather(grasp_score, 2, grasp_depth_class).squeeze(-1)
     label_mask, _ = torch.max(end_points['label_mask'], dim=-1)
     end_points['grasp_width_fuse'] = grasp_width
 

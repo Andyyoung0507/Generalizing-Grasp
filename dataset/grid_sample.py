@@ -35,15 +35,18 @@ def grid_sample_sdf(mesh,save_dir):
     np.savez(save_path,points=grid_3d,sdf=sdf)
     return
 
+# 利用了多进程的方法来生成相关的SDF文件用于反向传播梯度计算！
 if __name__ == "__main__":
     import multiprocessing
-    model_path = "/data/graspnet/models"
+    # model_path = "/data/graspnet/models"
+    model_path = "/home/axe/Downloads/datasets/GraspNet/models"
     obj_dirs = os.listdir(model_path)
     pool = multiprocessing.Pool(32)
     from tqdm import tqdm
     for i in tqdm(range(len(obj_dirs))):
         obj_dir = os.path.join(model_path, obj_dirs[i])
         print(obj_dir)
+        # 生成的相关的文件在原来graspnet数据集中的model文件夹下
         obj_mesh = trimesh.load(os.path.join(obj_dir,"nontextured.ply"),process=False)
         pool.apply_async(grid_sample_sdf, args=(obj_mesh,obj_dir))
     pool.close()
